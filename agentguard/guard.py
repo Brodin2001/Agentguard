@@ -97,7 +97,30 @@ class AgentGuard:
             # Maximum
             if "max" in rules:
 
-                if value > rules["max"]:
+                try:
+                    exceeds_max = value > rules["max"]
+                except TypeError:
+                    reason = (
+                        f"Argument '{argument_name}' has an invalid "
+                        "type for the configured maximum rule."
+                    )
+
+                    self.audit_log.record({
+                        "state": state,
+                        "tool": tool,
+                        "decision": "DENIED",
+                        "reason": reason
+                    })
+
+                    return {
+                        "allowed": False,
+                        "state": state,
+                        "tool": tool,
+                        "reason": reason,
+                        "executed": False,
+                    }
+
+                if exceeds_max:
 
                     reason = (
                         f"Argument '{argument_name}' "
@@ -123,7 +146,30 @@ class AgentGuard:
             # Minimum
             if "min" in rules:
 
-                if value < rules["min"]:
+                try:
+                    below_min = value < rules["min"]
+                except TypeError:
+                    reason = (
+                        f"Argument '{argument_name}' has an invalid "
+                        "type for the configured minimum rule."
+                    )
+
+                    self.audit_log.record({
+                        "state": state,
+                        "tool": tool,
+                        "decision": "DENIED",
+                        "reason": reason
+                    })
+
+                    return {
+                        "allowed": False,
+                        "state": state,
+                        "tool": tool,
+                        "reason": reason,
+                        "executed": False,
+                    }
+
+                if below_min:
 
                     reason = (
                         f"Argument '{argument_name}' "
