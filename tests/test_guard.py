@@ -78,6 +78,19 @@ class TestAgentGuard(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertFalse(self.executed)
 
+    def test_unknown_state_is_denied(self):
+        result = self.guard.call(
+            state="unknown",
+            tool="search",
+            function=self.search,
+            arguments={"query": "customers"}
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertFalse(result["executed"])
+        self.assertFalse(self.executed)
+        self.assertIn("Unknown agent state", result["reason"])
+
     def test_allowed_argument_executes(self):
         result = self.guard.call(
             state="execution",
@@ -122,6 +135,43 @@ class TestAgentGuard(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertFalse(result["executed"])
         self.assertFalse(self.executed)
+
+    def test_invalid_argument_type_is_denied(self):
+        result = self.guard.call(
+            state="execution",
+            tool="issue_refund",
+            function=self.issue_refund,
+            arguments={
+                "customer_id": "123",
+                "amount": "500"
+            }
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertFalse(result["executed"])
+        self.assertFalse(self.executed)
+        self.assertIn("invalid type", result["reason"])
+
+    def test_tool_execution_error_is_returned_and_logged(self):
+        def failing_tool():
+            self.executed = True
+            raise RuntimeError("simulated failure")
+
+        result = self.guard.call(
+            state="execution",
+            tool="search",
+            function=failing_tool,
+            arguments={}
+        )
+
+        self.assertTrue(self.executed)
+        self.assertTrue(result["allowed"])
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["error"], "simulated failure")
+        self.assertEqual(
+            self.guard.audit_log.get_events()[-1]["decision"],
+            "ERROR"
+        )
 
     def test_every_decision_is_logged(self):
         self.guard.call(
