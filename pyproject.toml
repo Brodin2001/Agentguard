@@ -11,9 +11,21 @@ requires-python = ">=3.10"
 authors = [
     {name = "AgentGuard"}
 ]
-dependencies = [
+dependencies = []
+
+[project.optional-dependencies]
+langchain = [
+    "langchain>=1.0,<2",
+]
+langgraph = [
+    "langgraph>=1.2,<2",
+]
+all = [
     "langchain>=1.0,<2",
     "langgraph>=1.2,<2",
+]
+tests = [
+    "pytest>=8,<9",
 ]
 
 [tool.setuptools.packages.find]
