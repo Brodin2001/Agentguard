@@ -1,8 +1,8 @@
 # AgentGuard
 
-AgentGuard is a runtime authorization layer between an AI agent and its Python tools.
+AgentGuard is a lightweight runtime authorization layer between an AI agent and its Python tools.
 
-Your agent can request a tool. Your policy decides whether that tool is allowed to execute. If a call is denied, AgentGuard does not call the underlying function.
+It evaluates a requested tool call against an explicit policy before the underlying function runs. If the request is denied, the function is not called.
 
 ```text
 Agent requests tool
@@ -14,37 +14,35 @@ ALLOW       DENY
 Tool runs  Tool blocked
 ```
 
-This is an early validation MVP for developers building Python AI agents.
+> Early validation MVP. Not a production security system.
 
 ## Install
 
-From this repository:
+Clone the repository and install the package:
 
 ```bash
+git clone https://github.com/Brodin2001/Agentguard.git
+cd Agentguard
 python -m pip install -e .
+```
+
+The core package has no mandatory framework dependencies.
+
+For integrations:
+
+```bash
+python -m pip install -e ".[langchain]"
+python -m pip install -e ".[langgraph]"
 ```
 
 ## Quickstart
 
-```bash
-python examples/quickstart.py
-```
-
-The quickstart shows an allowed function call, an unauthorized tool blocked before execution, and an unsafe argument blocked before execution.
-
-## Connect your LangChain agent
-
-AgentGuard can sit between a LangChain agent and the Python tools it is allowed to execute.
-
 ```python
-from langchain.agents import create_agent
-from langchain.tools import tool
-
 from agentguard import AgentGuard
 
 
-def send_email(to: str, subject: str, body: str) -> str:
-    return "Email sent"
+def send_email(to, subject):
+    return f"Email sent to {to}: {subject}"
 
 
 guard = AgentGuard({
@@ -53,254 +51,120 @@ guard = AgentGuard({
     }
 })
 
-
-@tool("send_email")
-def guarded_send_email(to: str, subject: str, body: str) -> str:
-    """Send a customer email."""
-
-    result = guard.call(
-        state="support",
-        tool="send_email",
-        function=send_email,
-        arguments={
-            "to": to,
-            "subject": subject,
-            "body": body
-        },
-    )
-
-    return result.get(
-        "result",
-        f"BLOCKED: {result['reason']}"
-    )
-
-
-agent = create_agent(
-    model,
-    tools=[guarded_send_email]
-)
-```
-
-A denied request returns `BLOCKED: ...` to the agent and never calls the underlying function.
-
-Run the included API-key-free LangChain demo:
-
-```bash
-python examples/langchain_agent.py
-```
-
-## Connect an existing Python tool
-
-Your existing function stays unchanged. Pass it to `guard.call()` instead of calling it directly.
-
-```python
-from agentguard import AgentGuard
-
-
-def send_email(to, subject, body):
-    print(f"[REAL TOOL] Sending email to {to}")
-    return "Email sent"
-
-
-guard = AgentGuard({
-    "support": {
-        "allowed_tools": ["send_email"],
-    },
-})
-
-
 result = guard.call(
     state="support",
     tool="send_email",
     function=send_email,
     arguments={
         "to": "customer@example.com",
-        "subject": "Update",
-        "body": "Your request is complete.",
+        "subject": "Your request is complete",
     },
 )
+
+print(result)
 ```
 
-For an allowed request:
+Run the included quickstart:
+
+```bash
+python examples/quickstart.py
+```
+
+It demonstrates an allowed call and denied calls for unauthorized tools and unsafe arguments.
+
+## Policies
+
+Authorize tools by agent state:
 
 ```python
-{
-    "allowed": True,
-    "state": "support",
-    "tool": "send_email",
-    "reason": "Tool and arguments are permitted.",
-    "executed": True,
-    "result": "Email sent",
+policies = {
+    "support": {
+        "allowed_tools": ["send_email"]
+    }
 }
 ```
 
-For a denied request, `allowed` and `executed` are both `False`; the function was not run.
-
-## Argument limits
-
-Use `min` and `max` policies to constrain arguments before execution:
+Constrain numeric arguments with `min` and `max`:
 
 ```python
-guard = AgentGuard({
+policies = {
     "payments": {
         "allowed_tools": ["refund"],
         "argument_rules": {
             "refund": {
                 "amount": {
                     "min": 1,
-                    "max": 500
+                    "max": 500,
                 }
             }
-        }
+        },
     }
-})
+}
 ```
 
-A request for:
+Unknown states fail closed. A denied request returns `allowed=False` and `executed=False`, and the underlying function is not called.
 
-```python
-refund(amount=5000)
+## Integrations
+
+AgentGuard currently includes examples and tests for:
+
+- Plain Python tools
+- LangChain
+- LangGraph
+
+LangChain example:
+
+```bash
+python examples/langchain_agent.py
 ```
 
-is denied before the function executes.
+LangGraph example:
+
+```bash
+python examples/langgraph_agent.py
+```
+
+The integrations keep AgentGuard at the tool-execution boundary rather than replacing the agent framework.
 
 ## Audit log
 
-Every authorization decision is available in memory:
+Authorization decisions are recorded in an in-memory audit log:
 
 ```python
-events = guard.audit_log.get_events()
-
-for event in events:
+for event in guard.audit_log.get_events():
     print(event)
 ```
 
-Each event records the timestamp, agent state, tool, decision, and reason.
+Events include the timestamp, state, tool, decision, and reason.
 
-## Run the demo
+## Testing
 
-See AgentGuard allow legitimate actions and block unauthorized or unsafe requests:
+Install the test dependency:
 
 ```bash
-python examples/demo.py
+python -m pip install -e ".[tests]"
 ```
 
-Run the tests:
+Run the test suite:
 
 ```bash
 pytest -q
 ```
 
-## Current MVP
+The repository includes core authorization tests plus LangChain and LangGraph integration tests.
 
-AgentGuard currently provides:
+## Examples
 
-* Tool authorization by agent state
-* Argument limits
-* Fail-closed behavior for unknown states
-* Tool execution only after authorization
-* In-memory audit logging
-* LangChain/LangGraph examples
+- `examples/quickstart.py` — smallest working example
+- `examples/attack_demo.py` — attempts unauthorized and unsafe actions
+- `examples/langchain_agent.py` — LangChain integration
+- `examples/langgraph_agent.py` — LangGraph integration
+- `examples/developer_integration.py` — integration-oriented example
 
-This is an early validation MVP and is **not intended to be a production security system yet**.
+## Important limitation
 
-## Feedback
+AgentGuard protects calls that are routed through `guard.call()` or otherwise explicitly wrapped by the integration. Direct calls to the underlying Python function bypass AgentGuard.
 
-AgentGuard is being built to solve a simple problem:
+This project is currently being validated with developers building real AI-agent systems. The goal of the current MVP is to determine whether deterministic tool authorization solves a meaningful problem in real workflows.
 
-**How do you stop an AI agent from executing a tool it shouldn't be allowed to execute?**
-
-If you're building AI agents, I'd like to know:
-
-* Would you use something like this?
-* Where would you put it in your agent architecture?
-* What's missing before you'd try it?
-* What would make this useful in production?
-
-**Try it and tell me what you'd change.**
-# AgentGuard
-
-A lightweight authorization layer for AI agents and tool execution.
-
-## What it does
-
-AgentGuard sits between an AI agent and the tools it wants to execute.
-
-Instead of allowing the model to directly decide whether an action happens, AgentGuard evaluates the requested tool call against an explicit policy.
-
-AI Agent
-↓
-Tool Request
-↓
-AgentGuard
-↓
-Allow / Deny
-↓
-Tool Execution
-
-## Why
-
-AI agents are increasingly being given access to real tools such as:
-
-- APIs
-- databases
-- email
-- CRMs
-- files
-- external services
-
-Prompt instructions and framework guardrails can influence model behaviour, but they should not be the final security boundary.
-
-AgentGuard experiments with putting deterministic authorization outside the model's control.
-
-## Current MVP
-
-The current MVP focuses on:
-
-- Tool authorization
-- Explicit policies
-- Allow/deny decisions
-- Audit logging
-- Python-based agent/tool workflows
-
-This project is currently being validated with AI-agent developers.
-
-## Example
-
-An agent requests:
-
-send_email(to="customer@example.com")
-
-AgentGuard evaluates the request against the configured policy.
-
-If permitted:
-
-ALLOW
-
-If not permitted:
-
-DENY
-
-The goal is to make this type of authorization easier than developers writing their own permission logic for every agent.
-
-## Status
-
-Early MVP / validation stage.
-
-The project is actively being tested with developers building real AI-agent systems.
-
-Feedback, criticism and practical use cases are welcome.
-
-## Getting Started
-
-Clone the repository:
-
-git clone https://github.com/Brodin2001/Agentguard.git
-
-cd Agentguard
-
-The project is currently experimental and intended for evaluation rather than production security use.
-
-## Feedback
-
-If you're building agents with real tool access and have experience with permissions, guardrails, human approval or tool authorization, I'd especially like to hear how you're handling that problem today.
+If you build tool-using agents, the most useful feedback is practical: what you protected, where AgentGuard fit into your architecture, what failed, and whether you would keep using it.
