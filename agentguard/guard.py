@@ -1,4 +1,5 @@
 from .audit import AuditLog
+from .receipt import AuthorizationReceipt, ReceiptAuthority
 
 
 class AgentGuard:
@@ -10,6 +11,7 @@ class AgentGuard:
     def __init__(self, policies):
         self.policies = policies
         self.audit_log = AuditLog()
+        self.receipts = ReceiptAuthority(lambda: self.policies)
 
     def authorize(self, state, tool, arguments=None):
         """
@@ -267,4 +269,106 @@ class AgentGuard:
             **decision,
             "executed": True,
             "result": result
+        }
+
+    def issue_receipt(
+        self,
+        state,
+        tool,
+        arguments=None,
+        target=None,
+        agent_id=None,
+        runtime_id=None,
+        ttl_seconds=30.0,
+    ):
+        """Authorize one exact action and issue a short-lived receipt."""
+        if arguments is None:
+            arguments = {}
+
+        decision = self.authorize(
+            state=state,
+            tool=tool,
+            arguments=arguments,
+        )
+        if not decision["allowed"]:
+            raise PermissionError(decision["reason"])
+
+        return self.receipts.issue(
+            tool=tool,
+            arguments=arguments,
+            target=target,
+            agent_id=agent_id,
+            runtime_id=runtime_id,
+            ttl_seconds=ttl_seconds,
+        )
+
+    def execute_receipt(
+        self,
+        receipt: AuthorizationReceipt,
+        function,
+        arguments=None,
+        target=None,
+        agent_id=None,
+        runtime_id=None,
+    ):
+        """Verify and consume a receipt immediately before tool execution.
+
+        This protects the execution path that explicitly uses this adapter.
+        It does not prevent arbitrary code in the same process from calling
+        the underlying function through a different route.
+        """
+        if arguments is None:
+            arguments = {}
+
+        allowed, reason = self.receipts.verify_and_consume(
+            receipt=receipt,
+            tool=receipt.tool,
+            arguments=arguments,
+            target=target,
+            agent_id=agent_id,
+            runtime_id=runtime_id,
+        )
+
+        if not allowed:
+            self.audit_log.record({
+                "tool": receipt.tool,
+                "decision": "DENIED",
+                "reason": reason,
+                "receipt_id": receipt.decision_id,
+            })
+            return {
+                "allowed": False,
+                "executed": False,
+                "reason": reason,
+                "receipt_id": receipt.decision_id,
+            }
+
+        try:
+            result = function(**arguments)
+        except Exception as error:
+            reason = f"Tool execution failed: {error}"
+            self.audit_log.record({
+                "tool": receipt.tool,
+                "decision": "ERROR",
+                "reason": reason,
+                "receipt_id": receipt.decision_id,
+            })
+            return {
+                "allowed": True,
+                "executed": False,
+                "error": str(error),
+                "receipt_id": receipt.decision_id,
+            }
+
+        self.audit_log.record({
+            "tool": receipt.tool,
+            "decision": "EXECUTED",
+            "reason": reason,
+            "receipt_id": receipt.decision_id,
+        })
+        return {
+            "allowed": True,
+            "executed": True,
+            "result": result,
+            "receipt_id": receipt.decision_id,
         }
