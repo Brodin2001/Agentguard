@@ -1,24 +1,12 @@
 # AgentGuard
 
-AgentGuard is a lightweight runtime authorization layer between an AI agent and its Python tools.
+AgentGuard is a lightweight runtime authorization layer for AI agent tool calls.
 
-It evaluates a requested tool call against an explicit policy before the underlying function runs. If the request is denied, the function is not called.
+It evaluates a requested tool call against an explicit policy before the underlying function runs. The v0.2 experiment adds **action-bound authorization receipts**: a short-lived receipt binds authorization to the exact tool, arguments, target, runtime identity, and policy state before the protected execution path runs.
 
-```text
-Agent requests tool
-        |
-   AgentGuard
-   /        \
-ALLOW       DENY
-  |           |
-Tool runs  Tool blocked
-```
-
-> Early validation MVP. Not a production security system.
+> **Early validation MVP / research experiment. Not a production security system.**
 
 ## Install
-
-Clone the repository and install the package:
 
 ```bash
 git clone https://github.com/Brodin2001/Agentguard.git
@@ -35,7 +23,7 @@ python -m pip install -e ".[langchain]"
 python -m pip install -e ".[langgraph]"
 ```
 
-## Quickstart
+## Basic authorization
 
 ```python
 from agentguard import AgentGuard
@@ -60,17 +48,64 @@ result = guard.call(
         "subject": "Your request is complete",
     },
 )
-
-print(result)
 ```
 
-Run the included quickstart:
+## Action-bound authorization receipts
 
-```bash
-python examples/quickstart.py
+For consequential actions, the v0.2 experiment lets you authorize an exact candidate action first, then require a receipt immediately before execution:
+
+```python
+from agentguard import AgentGuard
+
+
+def refund(customer_id, amount):
+    return f"Refunded ${amount}"
+
+
+guard = AgentGuard({
+    "execution": {
+        "allowed_tools": ["refund"],
+        "argument_rules": {
+            "refund": {
+                "amount": {"min": 1, "max": 500}
+            }
+        },
+    }
+})
+
+arguments = {"customer_id": "customer-123", "amount": 100}
+
+receipt = guard.issue_receipt(
+    state="execution",
+    tool="refund",
+    arguments=arguments,
+    target="customer-123",
+    agent_id="agent-1",
+    runtime_id="run-1",
+    ttl_seconds=30,
+)
+
+result = guard.execute_receipt(
+    receipt,
+    refund,
+    arguments=arguments,
+    target="customer-123",
+    agent_id="agent-1",
+    runtime_id="run-1",
+)
 ```
 
-It demonstrates an allowed call and denied calls for unauthorized tools and unsafe arguments.
+The receipt is bound to the exact action and policy state. The protected execution path rejects:
+
+- changed arguments
+- changed target
+- changed agent or runtime identity
+- expired receipts
+- replayed receipts
+- tampered receipts
+- receipts issued under a changed policy
+
+The receipt MAC is intended to make the receipt tamper-evident **within the AgentGuard process**. It does not make arbitrary Python code in the same process unable to call an underlying function through another route.
 
 ## Policies
 
@@ -106,7 +141,7 @@ Unknown states fail closed. A denied request returns `allowed=False` and `execut
 
 ## Integrations
 
-AgentGuard currently includes examples and tests for:
+AgentGuard includes examples and tests for:
 
 - Plain Python tools
 - LangChain
@@ -124,8 +159,6 @@ LangGraph example:
 python examples/langgraph_agent.py
 ```
 
-The integrations keep AgentGuard at the tool-execution boundary rather than replacing the agent framework.
-
 ## Audit log
 
 Authorization decisions are recorded in an in-memory audit log:
@@ -135,23 +168,14 @@ for event in guard.audit_log.get_events():
     print(event)
 ```
 
-Events include the timestamp, state, tool, decision, and reason.
-
 ## Testing
-
-Install the test dependency:
 
 ```bash
 python -m pip install -e ".[tests]"
+pytest -q tests/test_guard.py tests/test_receipts.py
 ```
 
-Run the test suite:
-
-```bash
-pytest -q
-```
-
-The repository includes core authorization tests plus LangChain and LangGraph integration tests.
+The receipt tests deliberately attack the authorization boundary with altered arguments, substituted targets, identity changes, replay, expiry, policy changes, and receipt tampering.
 
 ## Examples
 
@@ -163,8 +187,8 @@ The repository includes core authorization tests plus LangChain and LangGraph in
 
 ## Important limitation
 
-AgentGuard protects calls that are routed through `guard.call()` or otherwise explicitly wrapped by the integration. Direct calls to the underlying Python function bypass AgentGuard.
+AgentGuard protects execution paths that are explicitly routed through `guard.call()` or `guard.execute_receipt()` (or an integration that provides equivalent enforcement). Direct calls to the underlying Python function bypass AgentGuard.
 
-This project is currently being validated with developers building real AI-agent systems. The goal of the current MVP is to determine whether deterministic tool authorization solves a meaningful problem in real workflows.
+The v0.2 receipt experiment is designed to test whether binding authorization to the exact candidate action materially improves the execution boundary. It is not presented as a complete security boundary against arbitrary code with equivalent process privileges.
 
-If you build tool-using agents, the most useful feedback is practical: what you protected, where AgentGuard fit into your architecture, what failed, and whether you would keep using it.
+This project is being validated with developers building real AI-agent systems. The goal is evidence: real workflows, real integrations, real bypass attempts, and ultimately willingness to keep using and pay for the solution.
