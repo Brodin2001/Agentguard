@@ -37,8 +37,17 @@ allowed = guard.execute_receipt(
 )
 print("ALLOWED:", allowed)
 
+attack_receipt = guard.issue_receipt(
+    state="execution",
+    tool="refund",
+    arguments=arguments,
+    target="customer-123",
+    agent_id="agent-1",
+    runtime_id="run-1",
+)
+
 changed = guard.execute_receipt(
-    receipt,
+    attack_receipt,
     refund,
     arguments={"customer_id": "customer-123", "amount": 400},
     target="customer-123",
