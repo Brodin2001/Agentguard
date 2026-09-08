@@ -53,6 +53,7 @@ class AuthorizationReceipt:
     equivalent access to the same Python process.
     """
 
+    state: str
     tool: str
     arguments_hash: str
     target: str | None
@@ -85,6 +86,7 @@ class ReceiptAuthority:
 
     def issue(
         self,
+        state: str,
         tool: str,
         arguments: Mapping[str, Any],
         target: str | None = None,
@@ -101,9 +103,11 @@ class ReceiptAuthority:
         arguments_hash = action_digest(
             tool, arguments, target, agent_id, runtime_id
         )
-        policy_hash = policy_digest(self._policy_provider())
+        policies = self._policy_provider()
+        policy_hash = policy_digest(policies[state])
 
         unsigned = self._signing_payload(
+            state=state,
             tool=tool,
             arguments_hash=arguments_hash,
             target=target,
@@ -121,6 +125,7 @@ class ReceiptAuthority:
         ).hexdigest()
 
         return AuthorizationReceipt(
+            state=state,
             tool=tool,
             arguments_hash=arguments_hash,
             target=target,
@@ -151,6 +156,7 @@ class ReceiptAuthority:
         expected_mac = hmac.new(
             self._secret,
             self._signing_payload(
+                state=receipt.state,
                 tool=receipt.tool,
                 arguments_hash=receipt.arguments_hash,
                 target=receipt.target,
@@ -169,7 +175,10 @@ class ReceiptAuthority:
         if now >= receipt.expires_at:
             return False, "Authorization receipt has expired."
 
-        current_policy_hash = policy_digest(self._policy_provider())
+        policies = self._policy_provider()
+        if receipt.state not in policies:
+            return False, "Authorization receipt state no longer exists."
+        current_policy_hash = policy_digest(policies[receipt.state])
         if receipt.policy_hash != current_policy_hash:
             return False, "Authorization receipt policy is stale."
 
