@@ -99,7 +99,8 @@ class TestAuthorizationReceipts(unittest.TestCase):
         tampered = replace(receipt, capability_id="attacker-capability")
         result = self.execute(tampered)
         self.assertFalse(result["allowed"])
-        self.assertIn("integrity check failed", result["reason"])
+        self.assertEqual(result["executed"], False)
+        self.assertIn("Authorized executable capability", result["reason"])
         self.assertEqual(self.executed, [])
 
     def test_denied_action_cannot_issue_receipt(self):
