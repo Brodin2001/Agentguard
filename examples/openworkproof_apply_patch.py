@@ -15,6 +15,8 @@ additional execution-boundary check under test.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from agentguard import AgentGuard
@@ -32,6 +34,45 @@ def build_guard() -> AgentGuard:
             }
         }
     )
+
+
+def make_owp_executor(
+    *,
+    ledger_path: Path,
+    evidence_root: Path,
+    context: Any,
+    request: Any,
+    request_arguments: Any,
+    execution_facts: Any,
+    sidecar_private_key: Any,
+    patch_bytes: bytes,
+    candidate_workspace: Any,
+    handler: Callable[..., Any],
+    clock: Callable[[], datetime],
+) -> Callable[[], Any]:
+    """Bind the exact pinned OWP ``execute_apply_patch`` call.
+
+    OpenWorkProof is intentionally an optional integration dependency here.
+    The import happens only when this adapter is used.
+    """
+    from openworkproof.mcp_server import execute_apply_patch
+
+    def execute() -> Any:
+        return execute_apply_patch(
+            ledger_path,
+            evidence_root=evidence_root,
+            context=context,
+            request=request,
+            request_arguments=request_arguments,
+            execution_facts=execution_facts,
+            sidecar_private_key=sidecar_private_key,
+            patch_bytes=patch_bytes,
+            candidate_workspace=candidate_workspace,
+            handler=handler,
+            clock=clock,
+        )
+
+    return execute
 
 
 def guarded_apply_patch(
@@ -96,7 +137,7 @@ if __name__ == "__main__":
         agent_id="openworkproof-test-agent",
         runtime_id="agentguard-owp-v1.4.0-test",
         execute_owp=lambda: print(
-            "Call the pinned OpenWorkProof execute_apply_patch(...) here."
+            "Call make_owp_executor(...) with the pinned OWP execution context here."
         ),
     )
     print(result)
