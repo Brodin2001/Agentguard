@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import sys
 import types
 from pathlib import Path
@@ -55,11 +56,20 @@ def test_openworkproof_adapter_derives_and_executes_exact_action(monkeypatch, tm
     assert len(calls) == 1
 
 
-def test_openworkproof_adapter_uses_actual_patch_digest(monkeypatch, tmp_path):
+def test_openworkproof_adapter_binds_actual_patch_digest(monkeypatch, tmp_path):
     calls = []
     _fake_owp(monkeypatch, calls)
     workspace, request, request_arguments, facts, patch_bytes = _inputs(tmp_path)
     guard = build_guard()
+    issued = []
+
+    original_issue_receipt = guard.issue_receipt
+
+    def capture_issue_receipt(*args, **kwargs):
+        issued.append(kwargs.copy())
+        return original_issue_receipt(*args, **kwargs)
+
+    monkeypatch.setattr(guard, "issue_receipt", capture_issue_receipt)
 
     guarded_apply_patch(
         guard=guard,
@@ -76,11 +86,22 @@ def test_openworkproof_adapter_uses_actual_patch_digest(monkeypatch, tmp_path):
         clock=lambda: SimpleNamespace(),
     )
 
-    assert hashlib.sha256(patch_bytes).hexdigest() == hashlib.sha256(patch_bytes).hexdigest()
-    assert calls
+    assert len(issued) == 1
+    assert issued[0]["tool"] == OWP_TOOL
+    assert issued[0]["arguments"]["target_paths"] == ["src/app.py"]
+    assert issued[0]["arguments"]["patch_digest"] == hashlib.sha256(patch_bytes).hexdigest()
+    assert issued[0]["arguments"]["patch_size_bytes"] == len(patch_bytes)
+    assert issued[0]["target"] == str(Path(tmp_path).resolve())
+    assert issued[0]["agent_id"] == "agent-1"
+    assert issued[0]["runtime_id"] == "run-1"
+
+    assert calls[0][1]["patch_bytes"] == patch_bytes
+    assert calls[0][1]["candidate_workspace"] is workspace
+    assert calls[0][1]["request"] is request
+    assert calls[0][1]["request_arguments"] is request_arguments
 
 
 def test_execute_receipt_has_no_caller_supplied_callable_path():
     guard = build_guard()
-    assert "function" not in __import__("inspect").signature(guard.execute_receipt).parameters
+    assert "function" not in inspect.signature(guard.execute_receipt).parameters
     assert OWP_TOOL == "owp.apply_patch"
