@@ -1,5 +1,7 @@
 from .audit import AuditLog
 from .receipt import AuthorizationReceipt, ReceiptAuthority
+import secrets
+from typing import Any, Callable
 
 
 class AgentGuard:
@@ -9,6 +11,21 @@ class AgentGuard:
         self.policies = policies
         self.audit_log = AuditLog()
         self.receipts = ReceiptAuthority(lambda: self.policies)
+        self._capabilities: dict[str, tuple[str, Callable[..., Any]]] = {}
+
+    def bind_tool(self, tool: str, function: Callable[..., Any]) -> str:
+        """Bind a tool identifier to the exact executable capability.
+
+        The returned capability ID is process-local and is included in every
+        receipt issued for the tool. Execution resolves the callable from this
+        trusted registry rather than accepting an unrelated callable.
+        """
+        capability_id = secrets.token_urlsafe(18)
+        self._capabilities[tool] = (capability_id, function)
+        return capability_id
+
+    def _capability(self, tool: str):
+        return self._capabilities.get(tool)
 
     def authorize(self, state, tool, arguments=None):
         """Decide whether a tool request is permitted without executing it."""
@@ -115,14 +132,24 @@ class AgentGuard:
         }
 
     def call(self, state, tool, function, arguments=None):
-        """Authorize a tool and execute it only if permitted."""
+        """Authorize and execute a registered tool capability."""
         if arguments is None:
             arguments = {}
+        bound = self._capability(tool)
+        if bound is None:
+            self.bind_tool(tool, function)
+            bound = self._capability(tool)
+        capability_id, registered = bound
+        if registered is not function:
+            return {
+                "allowed": False, "executed": False,
+                "reason": "Callable does not match the bound tool capability.",
+            }
         decision = self.authorize(state, tool, arguments)
         if not decision["allowed"]:
             return decision
         try:
-            result = function(**arguments)
+            result = registered(**arguments)
         except Exception as error:
             reason = f"Tool execution failed: {error}"
             self.audit_log.record({
@@ -136,15 +163,20 @@ class AgentGuard:
         self, state, tool, arguments=None, target=None,
         agent_id=None, runtime_id=None, ttl_seconds=30.0,
     ):
-        """Authorize one exact action and issue a short-lived receipt."""
+        """Authorize one exact action for a bound executable capability."""
         if arguments is None:
             arguments = {}
+        bound = self._capability(tool)
+        if bound is None:
+            raise ValueError(f"Tool '{tool}' has no bound executable capability.")
+        capability_id, _ = bound
         decision = self.authorize(state, tool, arguments)
         if not decision["allowed"]:
             raise PermissionError(decision["reason"])
         return self.receipts.issue(
             state=state,
             tool=tool,
+            capability_id=capability_id,
             arguments=arguments,
             target=target,
             agent_id=agent_id,
@@ -153,21 +185,31 @@ class AgentGuard:
         )
 
     def execute_receipt(
-        self, receipt: AuthorizationReceipt, function, arguments=None,
+        self, receipt: AuthorizationReceipt, arguments=None,
         target=None, agent_id=None, runtime_id=None,
     ):
-        """Verify and consume a receipt immediately before tool execution.
-
-        Only execution routed through this adapter receives receipt protection.
-        Alternate direct calls to the underlying function remain outside this
-        library's control boundary.
-        """
+        """Verify, consume, resolve, and execute the exact bound capability."""
         if arguments is None:
             arguments = {}
 
+        bound = self._capability(receipt.tool)
+        if bound is None:
+            reason = "No executable capability is bound to the authorized tool."
+            self.audit_log.record({
+                "state": receipt.state, "tool": receipt.tool,
+                "decision": "DENIED", "reason": reason,
+                "receipt_id": receipt.decision_id,
+            })
+            return {
+                "allowed": False, "executed": False,
+                "reason": reason, "receipt_id": receipt.decision_id,
+            }
+
+        capability_id, function = bound
         allowed, reason = self.receipts.verify_and_consume(
             receipt=receipt,
             tool=receipt.tool,
+            capability_id=capability_id,
             arguments=arguments,
             target=target,
             agent_id=agent_id,
