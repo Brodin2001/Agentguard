@@ -43,31 +43,27 @@ class TestAuthorizationReceipts(unittest.TestCase):
         )
 
     def test_exact_action_executes_once(self):
-        receipt = self.issue()
-        result = self.execute(receipt)
+        result = self.execute(self.issue())
         self.assertTrue(result["allowed"])
         self.assertTrue(result["executed"])
         self.assertEqual(self.executed, [("customer-123", 100)])
 
     def test_changed_argument_is_blocked(self):
-        receipt = self.issue(amount=100)
-        result = self.execute(receipt, {"customer_id": "customer-123", "amount": 400})
+        result = self.execute(self.issue(amount=100), {"customer_id": "customer-123", "amount": 400})
         self.assertFalse(result["allowed"])
         self.assertFalse(result["executed"])
         self.assertIn("Arguments do not match", result["reason"])
         self.assertEqual(self.executed, [])
 
     def test_changed_target_is_blocked(self):
-        receipt = self.issue(target="customer-123")
-        result = self.execute(receipt, target="customer-999")
+        result = self.execute(self.issue(), target="customer-999")
         self.assertFalse(result["allowed"])
         self.assertFalse(result["executed"])
         self.assertIn("Target does not match", result["reason"])
         self.assertEqual(self.executed, [])
 
     def test_changed_identity_is_blocked(self):
-        receipt = self.issue()
-        result = self.execute(receipt, agent_id="different-agent")
+        result = self.execute(self.issue(), agent_id="different-agent")
         self.assertFalse(result["allowed"])
         self.assertFalse(result["executed"])
         self.assertIn("Agent identity", result["reason"])
@@ -83,16 +79,7 @@ class TestAuthorizationReceipts(unittest.TestCase):
         self.assertEqual(len(self.executed), 1)
 
     def test_expired_receipt_is_blocked(self):
-        receipt = self.guard.receipts.issue(
-            state="execution",
-            tool="refund",
-            capability_id=self.guard._capability_for_tool("refund")[0],
-            arguments={"customer_id": "customer-123", "amount": 100},
-            target="customer-123",
-            agent_id="agent-1",
-            runtime_id="run-1",
-            ttl_seconds=1,
-        )
+        receipt = self.issue()
         self.guard.receipts._clock = lambda: receipt.expires_at
         result = self.execute(receipt)
         self.assertFalse(result["allowed"])
@@ -109,29 +96,29 @@ class TestAuthorizationReceipts(unittest.TestCase):
 
     def test_tampered_receipt_is_blocked(self):
         receipt = self.issue()
-        tampered = replace(receipt, target="customer-999")
-        result = self.execute(tampered, target="customer-999")
+        tampered = replace(receipt, capability_id="attacker-capability")
+        result = self.execute(tampered)
         self.assertFalse(result["allowed"])
         self.assertIn("integrity check failed", result["reason"])
         self.assertEqual(self.executed, [])
 
     def test_denied_action_cannot_issue_receipt(self):
         with self.assertRaises(PermissionError):
-            self.guard.issue_receipt(
-                state="execution",
-                tool="delete_database",
-                arguments={},
-            )
+            self.guard.issue_receipt(state="execution", tool="delete_database", arguments={})
 
-    def test_different_callable_cannot_be_substituted(self):
+    def test_receipt_remains_bound_to_original_capability_after_rebind(self):
         receipt = self.issue()
-        different = lambda **_: self.executed.append(("different", 0))
-        self.guard.bind_tool("refund", different)
+        different_calls = []
+
+        def different_refund(**_):
+            different_calls.append("different")
+
+        self.guard.bind_tool("refund", different_refund)
         result = self.execute(receipt)
-        self.assertFalse(result["allowed"])
-        self.assertFalse(result["executed"])
-        self.assertIn("Executable capability", result["reason"])
-        self.assertEqual(self.executed, [])
+        self.assertTrue(result["allowed"])
+        self.assertTrue(result["executed"])
+        self.assertEqual(self.executed, [("customer-123", 100)])
+        self.assertEqual(different_calls, [])
 
 
 if __name__ == "__main__":
