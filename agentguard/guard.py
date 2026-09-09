@@ -104,6 +104,11 @@ class AgentGuard:
         """Authorize one exact action for a bound executable capability."""
         if arguments is None:
             arguments = {}
+
+        decision = self.authorize(state, tool, arguments)
+        if not decision["allowed"]:
+            raise PermissionError(decision["reason"])
+
         if capability_id is None:
             bound = self._capability_for_tool(tool)
             if bound is None:
@@ -113,9 +118,7 @@ class AgentGuard:
             capability = self._capabilities.get(capability_id)
             if capability is None or capability[0] != tool:
                 raise ValueError("Capability does not match the requested tool.")
-        decision = self.authorize(state, tool, arguments)
-        if not decision["allowed"]:
-            raise PermissionError(decision["reason"])
+
         return self.receipts.issue(
             state=state,
             tool=tool,
