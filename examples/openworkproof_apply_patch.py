@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -84,22 +85,15 @@ def guarded_apply_patch(
     execution closure. The action is derived from the actual OWP request,
     arguments, patch payload, candidate workspace, and execution facts. The
     same bound capability is then resolved by AgentGuard at execution time.
-    """
-    executor = make_owp_executor(
-        ledger_path=ledger_path,
-        evidence_root=evidence_root,
-        context=context,
-        request=request,
-        request_arguments=request_arguments,
-        execution_facts=execution_facts,
-        sidecar_private_key=sidecar_private_key,
-        patch_bytes=patch_bytes,
-        candidate_workspace=candidate_workspace,
-        handler=handler,
-        clock=clock,
-    )
 
-    target_paths = list(request_arguments.target_paths)
+    ``request_arguments`` is deep-copied at the execution boundary so the
+    callable bound to the authorization receipt cannot later observe mutation
+    of the caller-owned argument object. Authorization and execution therefore
+    use the same argument snapshot.
+    """
+    execution_request_arguments = deepcopy(request_arguments)
+
+    target_paths = list(execution_request_arguments.target_paths)
     actual_patch_digest = hashlib.sha256(patch_bytes).hexdigest()
     action_arguments = {
         "operation": OWP_TOOL,
@@ -110,6 +104,20 @@ def guarded_apply_patch(
     workspace_target = str(candidate_workspace.worktree.resolve())
     agent_id = request.actor_id
     runtime_id = execution_facts.execution_context_id
+
+    executor = make_owp_executor(
+        ledger_path=ledger_path,
+        evidence_root=evidence_root,
+        context=context,
+        request=request,
+        request_arguments=execution_request_arguments,
+        execution_facts=execution_facts,
+        sidecar_private_key=sidecar_private_key,
+        patch_bytes=patch_bytes,
+        candidate_workspace=candidate_workspace,
+        handler=handler,
+        clock=clock,
+    )
 
     def bound_executor(**_arguments: Any) -> Any:
         return executor()
