@@ -98,7 +98,8 @@ def test_openworkproof_adapter_binds_actual_patch_digest(monkeypatch, tmp_path):
     assert calls[0][1]["patch_bytes"] == patch_bytes
     assert calls[0][1]["candidate_workspace"] is workspace
     assert calls[0][1]["request"] is request
-    assert calls[0][1]["request_arguments"] is request_arguments
+    assert calls[0][1]["request_arguments"] is not request_arguments
+    assert calls[0][1]["request_arguments"].target_paths == request_arguments.target_paths
 
 
 def test_openworkproof_adapter_blocks_mutation_after_authorization_boundary(monkeypatch, tmp_path):
