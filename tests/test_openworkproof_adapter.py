@@ -1,7 +1,8 @@
 import hashlib
 import inspect
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 from examples.openworkproof_apply_patch import (
     OWP_TOOL,
@@ -45,9 +46,22 @@ def _fake_owp(monkeypatch, calls):
 
         return {"status": "succeeded"}
 
-    monkeypatch.setattr(
-        "openworkproof.mcp_server.execute_apply_patch",
-        fake_execute_apply_patch,
+    fake_openworkproof = ModuleType("openworkproof")
+    fake_mcp_server = ModuleType("openworkproof.mcp_server")
+
+    fake_openworkproof.__path__ = []
+    fake_mcp_server.execute_apply_patch = fake_execute_apply_patch
+    fake_openworkproof.mcp_server = fake_mcp_server
+
+    monkeypatch.setitem(
+        sys.modules,
+        "openworkproof",
+        fake_openworkproof,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "openworkproof.mcp_server",
+        fake_mcp_server,
     )
 
 
@@ -208,7 +222,6 @@ def test_openworkproof_adapter_snapshots_request_arguments(
         tmp_path
     )
 
-    original_issue_receipt = None
     guard = build_guard()
 
     original_issue_receipt = guard.issue_receipt
