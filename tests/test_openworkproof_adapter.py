@@ -101,6 +101,42 @@ def test_openworkproof_adapter_binds_actual_patch_digest(monkeypatch, tmp_path):
     assert calls[0][1]["request_arguments"] is request_arguments
 
 
+def test_openworkproof_adapter_blocks_mutation_after_authorization_boundary(monkeypatch, tmp_path):
+    calls = []
+    _fake_owp(monkeypatch, calls)
+    workspace, request, request_arguments, facts, patch_bytes = _inputs(tmp_path)
+    guard = build_guard()
+    original_issue_receipt = guard.issue_receipt
+
+    def issue_then_mutate(*args, **kwargs):
+        receipt = original_issue_receipt(*args, **kwargs)
+        request_arguments.target_paths = ("evil.py",)
+        return receipt
+
+    monkeypatch.setattr(guard, "issue_receipt", issue_then_mutate)
+
+    result = guarded_apply_patch(
+        guard=guard,
+        ledger_path=tmp_path / "ledger.json",
+        evidence_root=tmp_path / "evidence",
+        context=SimpleNamespace(),
+        request=request,
+        request_arguments=request_arguments,
+        execution_facts=facts,
+        sidecar_private_key=object(),
+        patch_bytes=patch_bytes,
+        candidate_workspace=workspace,
+        handler=lambda command: command,
+        clock=lambda: SimpleNamespace(),
+    )
+
+    assert result["allowed"] is True
+    assert result["executed"] is True
+    assert len(calls) == 1
+    assert request_arguments.target_paths == ("evil.py",)
+    assert calls[0][1]["request_arguments"].target_paths == ("src/app.py",)
+
+
 def test_execute_receipt_has_no_caller_supplied_callable_path():
     guard = build_guard()
     assert "function" not in inspect.signature(guard.execute_receipt).parameters
