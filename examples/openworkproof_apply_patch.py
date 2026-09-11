@@ -3,18 +3,16 @@
 Target OWP release: v1.4.0
 Target OWP commit: 14e967501ac164ba966c635a90b819c8bd60c2fb
 
-This example deliberately does not modify OpenWorkProof. It places the
-AgentGuard receipt check immediately before the call into OWP's protected
-``execute_apply_patch`` path.
-
-The OWP executor remains responsible for its own authorization, validation,
-receipt/evidence publication, and filesystem mutation. AgentGuard is the
-additional execution-boundary check under test.
+This example deliberately does not modify OpenWorkProof. It derives the
+AgentGuard action from the exact OWP execution inputs and binds the receipt
+to that executable capability before entering OWP's protected executor.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import hashlib
+from collections.abc import Callable
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -27,13 +25,7 @@ OWP_TOOL = "owp.apply_patch"
 
 def build_guard() -> AgentGuard:
     """Create the smallest policy needed for this experiment."""
-    return AgentGuard(
-        {
-            "patch": {
-                "allowed_tools": [OWP_TOOL],
-            }
-        }
-    )
+    return AgentGuard({"patch": {"allowed_tools": [OWP_TOOL]}})
 
 
 def make_owp_executor(
@@ -50,11 +42,7 @@ def make_owp_executor(
     handler: Callable[..., Any],
     clock: Callable[[], datetime],
 ) -> Callable[[], Any]:
-    """Bind the exact pinned OWP ``execute_apply_patch`` call.
-
-    OpenWorkProof is intentionally an optional integration dependency here.
-    The import happens only when this adapter is used.
-    """
+    """Bind the exact pinned OWP ``execute_apply_patch`` call."""
     from openworkproof.mcp_server import execute_apply_patch
 
     def execute() -> Any:
@@ -78,43 +66,88 @@ def make_owp_executor(
 def guarded_apply_patch(
     *,
     guard: AgentGuard,
-    action_arguments: Mapping[str, Any],
-    workspace_target: str,
-    agent_id: str,
-    runtime_id: str,
-    execute_owp: Callable[[], Any],
+    ledger_path: Path,
+    evidence_root: Path,
+    context: Any,
+    request: Any,
+    request_arguments: Any,
+    execution_facts: Any,
+    sidecar_private_key: Any,
+    patch_bytes: bytes,
+    candidate_workspace: Any,
+    handler: Callable[..., Any],
+    clock: Callable[[], datetime],
     ttl_seconds: float = 30.0,
 ) -> dict[str, Any]:
-    """Run one OWP apply-patch operation behind an AgentGuard receipt.
+    """Authorize and execute the exact OWP apply-patch operation.
 
-    ``action_arguments`` must describe the exact action that is about to be
-    handed to OWP. For the v1.4.0 experiment this should include, at minimum,
-    the operation name, declared target paths, patch digest, and patch size.
-    ``workspace_target`` identifies the disposable candidate workspace.
+    The caller cannot supply a separate AgentGuard declaration or arbitrary
+    execution closure. The action is derived from the actual OWP request,
+    arguments, patch payload, candidate workspace, and execution facts.
 
-    ``execute_owp`` should be a zero-argument closure around the real OWP
-    ``execute_apply_patch(...)`` invocation. The closure prevents the caller
-    from silently substituting a different OWP call after AgentGuard has
-    authorized the candidate action.
+    Mutable caller-owned execution inputs are snapshotted before authorization.
+    Authorization and execution therefore operate on the same execution
+    snapshots.
     """
-    arguments = dict(action_arguments)
+    execution_request = deepcopy(request)
+    execution_request_arguments = deepcopy(request_arguments)
+    execution_facts_snapshot = deepcopy(execution_facts)
+    execution_candidate_workspace = deepcopy(candidate_workspace)
+
+    target_paths = list(execution_request_arguments.target_paths)
+
+    actual_patch_digest = hashlib.sha256(patch_bytes).hexdigest()
+
+    action_arguments = {
+        "operation": OWP_TOOL,
+        "target_paths": target_paths,
+        "patch_digest": actual_patch_digest,
+        "patch_size_bytes": len(patch_bytes),
+    }
+
+    workspace_target = str(
+        execution_candidate_workspace.worktree.resolve()
+    )
+
+    agent_id = execution_request.actor_id
+    runtime_id = execution_facts_snapshot.execution_context_id
+
+    executor = make_owp_executor(
+        ledger_path=ledger_path,
+        evidence_root=evidence_root,
+        context=context,
+        request=execution_request,
+        request_arguments=execution_request_arguments,
+        execution_facts=execution_facts_snapshot,
+        sidecar_private_key=sidecar_private_key,
+        patch_bytes=patch_bytes,
+        candidate_workspace=execution_candidate_workspace,
+        handler=handler,
+        clock=clock,
+    )
+
+    def bound_executor(**_arguments: Any) -> Any:
+        return executor()
+
+    capability_id = guard.bind_tool(
+        OWP_TOOL,
+        bound_executor,
+    )
 
     receipt = guard.issue_receipt(
         state="patch",
         tool=OWP_TOOL,
-        arguments=arguments,
+        arguments=action_arguments,
         target=workspace_target,
         agent_id=agent_id,
         runtime_id=runtime_id,
         ttl_seconds=ttl_seconds,
+        capability_id=capability_id,
     )
 
-    # This is the intended AgentGuard placement: verification/consumption
-    # happens immediately before entering OpenWorkProof's protected executor.
     return guard.execute_receipt(
         receipt,
-        lambda **_: execute_owp(),
-        arguments=arguments,
+        arguments=action_arguments,
         target=workspace_target,
         agent_id=agent_id,
         runtime_id=runtime_id,
@@ -122,22 +155,7 @@ def guarded_apply_patch(
 
 
 if __name__ == "__main__":
-    guard = build_guard()
-    action = {
-        "operation": OWP_TOOL,
-        "target_paths": ["src/demo.py"],
-        "patch_digest": "replace-with-sha256-of-patch-bytes",
-        "patch_size_bytes": 42,
-    }
-
-    result = guarded_apply_patch(
-        guard=guard,
-        action_arguments=action,
-        workspace_target="disposable-openworkproof-workspace",
-        agent_id="openworkproof-test-agent",
-        runtime_id="agentguard-owp-v1.4.0-test",
-        execute_owp=lambda: print(
-            "Call make_owp_executor(...) with the pinned OWP execution context here."
-        ),
+    print(
+        "Use guarded_apply_patch(...) with the pinned "
+        "OpenWorkProof execution context."
     )
-    print(result)
