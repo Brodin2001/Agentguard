@@ -2,9 +2,9 @@
 
 AgentGuard is a lightweight runtime authorization layer for AI agent tool calls.
 
-It evaluates a requested tool call against an explicit policy before the underlying function runs. The v0.2 experiment adds **action-bound authorization receipts**: a short-lived receipt binds authorization to the exact tool, arguments, target, runtime identity, and policy state before the protected execution path runs.
+Its core model is **action-bound authorization**: for consequential actions, authorization can be bound to the exact tool, arguments, target, agent identity, runtime identity, executable capability, and current policy state immediately before execution.
 
-> **Early validation MVP / research experiment. Not a production security system.**
+> **Early-adopter MVP. Not a production security system or a guarantee against arbitrary code with equivalent process privileges.**
 
 ## Install
 
@@ -16,7 +16,7 @@ python -m pip install -e .
 
 The core package has no mandatory framework dependencies.
 
-For integrations:
+Optional integrations:
 
 ```bash
 python -m pip install -e ".[langchain]"
@@ -50,9 +50,9 @@ result = guard.call(
 )
 ```
 
-## Action-bound authorization receipts
+## Action-bound authorization
 
-For consequential actions, the v0.2 experiment lets you authorize an exact candidate action first, then require a receipt immediately before execution:
+For consequential actions, bind the executable capability first, issue a short-lived receipt for the exact candidate action, then execute the receipt immediately before the side effect:
 
 ```python
 from agentguard import AgentGuard
@@ -73,6 +73,8 @@ guard = AgentGuard({
     }
 })
 
+guard.bind_tool("refund", refund)
+
 arguments = {"customer_id": "customer-123", "amount": 100}
 
 receipt = guard.issue_receipt(
@@ -87,7 +89,6 @@ receipt = guard.issue_receipt(
 
 result = guard.execute_receipt(
     receipt,
-    refund,
     arguments=arguments,
     target="customer-123",
     agent_id="agent-1",
@@ -95,17 +96,19 @@ result = guard.execute_receipt(
 )
 ```
 
-The receipt is bound to the exact action and policy state. The protected execution path rejects:
+The receipt is bound to the executable capability and exact authorized action. Execution fails closed if there is a mismatch in:
 
-- changed arguments
-- changed target
-- changed agent or runtime identity
-- expired receipts
-- replayed receipts
-- tampered receipts
-- receipts issued under a changed policy
+- arguments
+- target
+- agent identity
+- runtime identity
+- executable capability
+- policy state
+- receipt integrity
+- expiry
+- replay
 
-The receipt MAC is intended to make the receipt tamper-evident **within the AgentGuard process**. It does not make arbitrary Python code in the same process unable to call an underlying function through another route.
+The receipt MAC is intended to make the receipt tamper-evident within the AgentGuard process. It does not prevent arbitrary Python code with equivalent process privileges from bypassing the library entirely.
 
 ## Policies
 
@@ -147,17 +150,19 @@ AgentGuard includes examples and tests for:
 - LangChain
 - LangGraph
 
-LangChain example:
+LangChain:
 
 ```bash
 python examples/langchain_agent.py
 ```
 
-LangGraph example:
+LangGraph:
 
 ```bash
 python examples/langgraph_agent.py
 ```
+
+The integrations keep enforcement at the tool-execution boundary rather than replacing the agent framework.
 
 ## Audit log
 
@@ -172,23 +177,25 @@ for event in guard.audit_log.get_events():
 
 ```bash
 python -m pip install -e ".[tests]"
-pytest -q tests/test_guard.py tests/test_receipts.py
+pytest -q
 ```
 
-The receipt tests deliberately attack the authorization boundary with altered arguments, substituted targets, identity changes, replay, expiry, policy changes, and receipt tampering.
+The test suite includes receipt attacks covering argument mutation, target mutation, identity changes, replay, expiry, policy changes, receipt tampering, and executable-capability substitution.
 
-## Examples
+## Early-adopter testing
 
-- `examples/quickstart.py` — smallest working example
-- `examples/attack_demo.py` — attempts unauthorized and unsafe actions
-- `examples/langchain_agent.py` — LangChain integration
-- `examples/langgraph_agent.py` — LangGraph integration
-- `examples/developer_integration.py` — integration-oriented example
+AgentGuard is currently being validated with developers building real tool-using AI agents.
+
+The highest-value test is not a demo tool. It is one consequential action in an existing workflow — for example an MCP write, database mutation, calendar/email action, repository change, deployment, or other side effect.
+
+The question we are testing is:
+
+> **The agent got approval. Did the exact action that was authorized actually become the action that executed?**
+
+If you have a consequential agent execution path, the most useful feedback is to connect one real path, deliberately attempt to mutate the authorized action, and report whether AgentGuard blocks the mismatch.
 
 ## Important limitation
 
-AgentGuard protects execution paths that are explicitly routed through `guard.call()` or `guard.execute_receipt()` (or an integration that provides equivalent enforcement). Direct calls to the underlying Python function bypass AgentGuard.
+AgentGuard protects execution paths that are explicitly routed through `guard.call()` or `guard.execute_receipt()` (or an integration providing equivalent enforcement). Direct calls to the underlying Python function bypass AgentGuard.
 
-The v0.2 receipt experiment is designed to test whether binding authorization to the exact candidate action materially improves the execution boundary. It is not presented as a complete security boundary against arbitrary code with equivalent process privileges.
-
-This project is being validated with developers building real AI-agent systems. The goal is evidence: real workflows, real integrations, real bypass attempts, and ultimately willingness to keep using and pay for the solution.
+This project is an early-adopter validation MVP. The goal is evidence from real workflows, real integrations, real bypass attempts, continued use, and ultimately willingness to pay.
