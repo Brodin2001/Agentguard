@@ -100,7 +100,7 @@ class TestAuthorizationReceipts(unittest.TestCase):
         result = self.execute(tampered)
         self.assertFalse(result["allowed"])
         self.assertFalse(result["executed"])
-        self.assertIn("Executable capability", result["reason"])
+        self.assertIn("executable capability", result["reason"].lower())
         self.assertEqual(self.executed, [])
 
     def test_denied_action_cannot_issue_receipt(self):
