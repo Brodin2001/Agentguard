@@ -46,7 +46,7 @@ def policy_digest(policy: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class AuthorizationReceipt:
-    """Short-lived authority for one exact candidate action.
+    """Short-lived authority for one exact action and executable capability.
 
     The MAC makes the receipt tamper-evident within the AgentGuard process.
     It is not a claim of protection against arbitrary malicious code with
@@ -55,6 +55,7 @@ class AuthorizationReceipt:
 
     state: str
     tool: str
+    capability_id: str
     arguments_hash: str
     target: str | None
     agent_id: str | None
@@ -88,6 +89,7 @@ class ReceiptAuthority:
         self,
         state: str,
         tool: str,
+        capability_id: str,
         arguments: Mapping[str, Any],
         target: str | None = None,
         agent_id: str | None = None,
@@ -109,6 +111,7 @@ class ReceiptAuthority:
         unsigned = self._signing_payload(
             state=state,
             tool=tool,
+            capability_id=capability_id,
             arguments_hash=arguments_hash,
             target=target,
             agent_id=agent_id,
@@ -127,6 +130,7 @@ class ReceiptAuthority:
         return AuthorizationReceipt(
             state=state,
             tool=tool,
+            capability_id=capability_id,
             arguments_hash=arguments_hash,
             target=target,
             agent_id=agent_id,
@@ -142,12 +146,13 @@ class ReceiptAuthority:
         self,
         receipt: AuthorizationReceipt,
         tool: str,
+        capability_id: str,
         arguments: Mapping[str, Any],
         target: str | None = None,
         agent_id: str | None = None,
         runtime_id: str | None = None,
     ) -> tuple[bool, str]:
-        """Verify exact action, policy freshness, expiry, integrity, and replay."""
+        """Verify exact action, capability, policy freshness, expiry, integrity, and replay."""
         now = self._clock()
 
         if receipt.nonce in self._consumed:
@@ -158,6 +163,7 @@ class ReceiptAuthority:
             self._signing_payload(
                 state=receipt.state,
                 tool=receipt.tool,
+                capability_id=receipt.capability_id,
                 arguments_hash=receipt.arguments_hash,
                 target=receipt.target,
                 agent_id=receipt.agent_id,
@@ -184,6 +190,9 @@ class ReceiptAuthority:
 
         if receipt.tool != tool:
             return False, "Tool does not match the authorized action."
+
+        if receipt.capability_id != capability_id:
+            return False, "Executable capability does not match the authorized action."
 
         if receipt.target != target:
             return False, "Target does not match the authorized action."

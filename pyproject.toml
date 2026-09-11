@@ -30,3 +30,6 @@ tests = [
 
 [tool.setuptools.packages.find]
 include = ["agentguard*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
