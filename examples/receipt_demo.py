@@ -16,6 +16,8 @@ guard = AgentGuard({
     }
 })
 
+guard.bind_tool("refund", refund)
+
 arguments = {"customer_id": "customer-123", "amount": 100}
 
 receipt = guard.issue_receipt(
@@ -29,7 +31,6 @@ receipt = guard.issue_receipt(
 
 allowed = guard.execute_receipt(
     receipt,
-    refund,
     arguments=arguments,
     target="customer-123",
     agent_id="agent-1",
@@ -48,7 +49,6 @@ attack_receipt = guard.issue_receipt(
 
 changed = guard.execute_receipt(
     attack_receipt,
-    refund,
     arguments={"customer_id": "customer-123", "amount": 400},
     target="customer-123",
     agent_id="agent-1",
