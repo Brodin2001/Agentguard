@@ -1,10 +1,16 @@
 # AgentGuard
 
-AgentGuard is a lightweight runtime authorization layer for AI agent tool calls.
+**Action-bound runtime authorization for AI agent tool calls.**
 
-It evaluates a requested tool call against an explicit policy before the underlying function runs. The v0.2 experiment adds **action-bound authorization receipts**: a short-lived receipt binds authorization to the exact tool, arguments, target, runtime identity, and policy state before the protected execution path runs.
+AgentGuard is a lightweight Python authorization layer designed to sit at the execution boundary between an AI agent and consequential tools.
 
-> **Early validation MVP / research experiment. Not a production security system.**
+Its core model is simple:
+
+> **Authorization should remain bound to the exact action that executes.**
+
+For consequential actions, AgentGuard can issue a short-lived authorization receipt bound to the exact tool, arguments, target, agent identity, runtime identity, executable capability, and policy state. The protected execution path verifies that binding immediately before the side effect.
+
+> **Early-adopter MVP. Not a production security system or a guarantee against arbitrary code with equivalent process privileges.**
 
 ## Install
 
@@ -16,7 +22,7 @@ python -m pip install -e .
 
 The core package has no mandatory framework dependencies.
 
-For integrations:
+Optional integrations:
 
 ```bash
 python -m pip install -e ".[langchain]"
@@ -50,9 +56,9 @@ result = guard.call(
 )
 ```
 
-## Action-bound authorization receipts
+## Action-bound authorization
 
-For consequential actions, the v0.2 experiment lets you authorize an exact candidate action first, then require a receipt immediately before execution:
+For consequential actions, bind the executable capability, issue a short-lived receipt for the exact candidate action, then consume that receipt immediately before execution:
 
 ```python
 from agentguard import AgentGuard
@@ -73,6 +79,8 @@ guard = AgentGuard({
     }
 })
 
+guard.bind_tool("refund", refund)
+
 arguments = {"customer_id": "customer-123", "amount": 100}
 
 receipt = guard.issue_receipt(
@@ -87,7 +95,6 @@ receipt = guard.issue_receipt(
 
 result = guard.execute_receipt(
     receipt,
-    refund,
     arguments=arguments,
     target="customer-123",
     agent_id="agent-1",
@@ -95,69 +102,41 @@ result = guard.execute_receipt(
 )
 ```
 
-The receipt is bound to the exact action and policy state. The protected execution path rejects:
+Execution fails closed if the receipt no longer matches the action or policy, including:
 
 - changed arguments
 - changed target
-- changed agent or runtime identity
-- expired receipts
-- replayed receipts
-- tampered receipts
-- receipts issued under a changed policy
+- changed agent identity
+- changed runtime identity
+- substituted executable capability
+- expired receipt
+- replayed receipt
+- tampered receipt
+- stale policy
 
-The receipt MAC is intended to make the receipt tamper-evident **within the AgentGuard process**. It does not make arbitrary Python code in the same process unable to call an underlying function through another route.
-
-## Policies
-
-Authorize tools by agent state:
-
-```python
-policies = {
-    "support": {
-        "allowed_tools": ["send_email"]
-    }
-}
-```
-
-Constrain numeric arguments with `min` and `max`:
-
-```python
-policies = {
-    "payments": {
-        "allowed_tools": ["refund"],
-        "argument_rules": {
-            "refund": {
-                "amount": {
-                    "min": 1,
-                    "max": 500,
-                }
-            }
-        },
-    }
-}
-```
-
-Unknown states fail closed. A denied request returns `allowed=False` and `executed=False`, and the underlying function is not called.
+The receipt MAC is intended to make the receipt tamper-evident within the AgentGuard process. It does not prevent arbitrary same-process code with equivalent privileges from calling an underlying function through another route.
 
 ## Integrations
 
-AgentGuard includes examples and tests for:
+AgentGuard includes examples for:
 
 - Plain Python tools
 - LangChain
 - LangGraph
 
-LangChain example:
+LangChain:
 
 ```bash
 python examples/langchain_agent.py
 ```
 
-LangGraph example:
+LangGraph:
 
 ```bash
 python examples/langgraph_agent.py
 ```
+
+The integrations keep enforcement at the tool-execution boundary rather than replacing the agent framework.
 
 ## Audit log
 
@@ -172,10 +151,18 @@ for event in guard.audit_log.get_events():
 
 ```bash
 python -m pip install -e ".[tests]"
-pytest -q tests/test_guard.py tests/test_receipts.py
+pytest -q
 ```
 
-The receipt tests deliberately attack the authorization boundary with altered arguments, substituted targets, identity changes, replay, expiry, policy changes, and receipt tampering.
+The receipt tests deliberately attack the authorization boundary with altered arguments, substituted targets, identity changes, replay, expiry, policy changes, receipt tampering, and executable-capability substitution.
+
+## Independent security validation
+
+AgentGuard's action-bound execution model has been independently adversarially retested against an OpenWorkProof integration.
+
+The independent retest ran **39/39 cases successfully**, including argument, target, agent-identity, runtime-identity, capability-substitution, replay, expiry, policy-staleness, and legitimate-execution cases. Two previously identified High-severity findings (AG-CORE-01 and AG-OWP-01) were independently verified as remediated.
+
+This is validation evidence, not a security certification or claim of complete protection.
 
 ## Examples
 
@@ -187,8 +174,6 @@ The receipt tests deliberately attack the authorization boundary with altered ar
 
 ## Important limitation
 
-AgentGuard protects execution paths that are explicitly routed through `guard.call()` or `guard.execute_receipt()` (or an integration that provides equivalent enforcement). Direct calls to the underlying Python function bypass AgentGuard.
+AgentGuard protects execution paths that are explicitly routed through `guard.call()` or `guard.execute_receipt()` (or an integration providing equivalent enforcement). Direct calls to the underlying Python function bypass AgentGuard.
 
-The v0.2 receipt experiment is designed to test whether binding authorization to the exact candidate action materially improves the execution boundary. It is not presented as a complete security boundary against arbitrary code with equivalent process privileges.
-
-This project is being validated with developers building real AI-agent systems. The goal is evidence: real workflows, real integrations, real bypass attempts, and ultimately willingness to keep using and pay for the solution.
+The project is being validated with developers building real AI-agent systems. The objective is evidence from real workflows and consequential actions: installs, integrations, bypass attempts, continued use, and ultimately willingness to pay.
