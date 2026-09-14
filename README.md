@@ -156,6 +156,14 @@ pytest -q
 
 The receipt tests deliberately attack the authorization boundary with altered arguments, substituted targets, identity changes, replay, expiry, policy changes, receipt tampering, and executable-capability substitution.
 
+## Execution-boundary challenge
+
+The fastest way to evaluate AgentGuard is to test the same failure modes against an existing agent authorization or approval flow.
+
+See **[Execution-Boundary Challenge](docs/execution-boundary-challenge.md)** for a small, framework-neutral test you can run against a real consequential tool path.
+
+The project is deliberately open to being falsified: if your existing architecture already guarantees that the action reaching the executor is still the action that was authorized, an additional AgentGuard layer may not add value.
+
 ## Independent security validation
 
 AgentGuard's action-bound execution model has been independently adversarially retested against an OpenWorkProof integration.
