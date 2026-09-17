@@ -150,9 +150,12 @@ for event in guard.audit_log.get_events():
 ## Testing
 
 ```bash
-python -m pip install -e ".[tests]"
+python -m pip install -e ".[all,tests]"
 pytest -q
 ```
+
+The full test suite includes the LangChain and LangGraph integration tests, so
+the test command installs both optional integrations as well as pytest.
 
 The receipt tests deliberately attack the authorization boundary with altered arguments, substituted targets, identity changes, replay, expiry, policy changes, receipt tampering, and executable-capability substitution.
 
