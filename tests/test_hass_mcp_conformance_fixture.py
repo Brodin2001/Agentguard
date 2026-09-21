@@ -1,4 +1,11 @@
-from examples.hass_mcp_conformance_fixture import run_fixture
+from pathlib import Path
+import runpy
+
+
+_FIXTURE = runpy.run_path(
+    str(Path(__file__).parents[1] / "examples" / "hass_mcp_conformance_fixture.py")
+)
+run_fixture = _FIXTURE["run_fixture"]
 
 
 def test_hass_mcp_style_conformance_fixture():
